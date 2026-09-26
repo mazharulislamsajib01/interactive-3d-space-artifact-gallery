@@ -603,4 +603,632 @@ void drawExterior()
     glVertex3f(-32.0f, 24.0f, -42.0f);
 
     glEnd();
+/*
+       Save all states altered by the 2D pass. The matrices are handled
+       separately below.
+    */
+    glPushAttrib(
+        GL_ENABLE_BIT |
+        GL_CURRENT_BIT |
+        GL_COLOR_BUFFER_BIT |
+        GL_DEPTH_BUFFER_BIT |
+        GL_LINE_BIT
+    );
 
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+
+    gluOrtho2D(
+        0.0,
+        static_cast<double>(windowWidth),
+        0.0,
+        static_cast<double>(windowHeight)
+    );
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(0.84f, 0.92f, 1.0f);
+
+    drawBitmapText(
+        18.0f,
+        windowHeight - 28.0f,
+        "Interactive 3D Space Artifact Gallery",
+        GLUT_BITMAP_HELVETICA_18
+    );
+
+    std::sprintf(
+        statusLine,
+        "Selected: %s   |   Animation: %s   |   Exterior: %s",
+        selectedArtifactName(),
+        animationRunning ? "RUNNING" : "PAUSED",
+        nightMode ? "NIGHT" : "DAY"
+    );
+
+    glColor3f(1.0f, 0.90f, 0.56f);
+
+    drawBitmapText(
+        18.0f,
+        windowHeight - 52.0f,
+        statusLine,
+        GLUT_BITMAP_9_BY_15
+    );
+
+    glColor3f(0.88f, 0.90f, 0.94f);
+
+    drawBitmapText(
+        18.0f,
+        windowHeight - 74.0f,
+        "WASD move | Arrow keys look | Tab select | Space pause | H help",
+        GLUT_BITMAP_8_BY_13
+    );
+
+    if (showHelp)
+    {
+        int y = windowHeight - 104;
+
+        glColor3f(0.74f, 0.86f, 1.0f);
+
+        drawBitmapText(
+            18.0f,
+            static_cast<float>(y),
+            "Selected object: J/L left-right, I/K forward-back, U/O up-down",
+            GLUT_BITMAP_8_BY_13
+        );
+
+        y -= 18;
+
+        drawBitmapText(
+            18.0f,
+            static_cast<float>(y),
+            "Q/E rotate, +/- scale (scale is clamped from 0.6 to 1.5)",
+            GLUT_BITMAP_8_BY_13
+        );
+
+        y -= 18;
+
+        drawBitmapText(
+            18.0f,
+            static_cast<float>(y),
+            "1/2/3 lights | N day/night | P comet | G door | R reset | Esc exit",
+            GLUT_BITMAP_8_BY_13
+        );
+    }
+
+    std::sprintf(
+        statusLine,
+        "Lights: 1[%s] 2[%s] 3[%s]   Door: %s",
+        lightEnabled[0] ? "ON" : "OFF",
+        lightEnabled[1] ? "ON" : "OFF",
+        lightEnabled[2] ? "ON" : "OFF",
+        doorAngle > 44.0f ? "OPEN" : "CLOSED"
+    );
+
+    glColor3f(0.78f, 0.83f, 0.89f);
+
+    drawBitmapText(
+        18.0f,
+        18.0f,
+        statusLine,
+        GLUT_BITMAP_8_BY_13
+    );
+
+    glPopMatrix();
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+
+    glMatrixMode(GL_MODELVIEW);
+    glPopAttrib();
+}
+
+/* ------------------------------------------------------------------------- */
+/* Camera, reset, rendering, and interaction                                  */
+/* ------------------------------------------------------------------------- */
+
+void resetScene()
+{
+    camera.x = 0.0f;
+    camera.y = 4.2f;
+    camera.z = 14.0f;
+    camera.yaw = -90.0f;
+    camera.pitch = -5.0f;
+
+    for (int i = 0; i < ARTIFACT_COUNT; ++i)
+    {
+        artifactTransforms[i].x = 0.0f;
+        artifactTransforms[i].y = 0.0f;
+        artifactTransforms[i].z = 0.0f;
+        artifactTransforms[i].rotationY = 0.0f;
+        artifactTransforms[i].scale = 1.0f;
+    }
+
+    selectedArtifact = 0;
+
+    orreryRotation = 0.0f;
+
+    planetOrbit[0] = 0.0f;
+    planetOrbit[1] = 120.0f;
+    planetOrbit[2] = 235.0f;
+
+    planetSpin[0] = 0.0f;
+    planetSpin[1] = 0.0f;
+    planetSpin[2] = 0.0f;
+
+    satelliteRotation = 0.0f;
+    cometPosition = 0.0f;
+
+    doorTargetOpen = false;
+    doorAngle = 0.0f;
+
+    animationRunning = true;
+}
+
+void clampCameraPosition()
+{
+    camera.x = clampFloat(camera.x, -17.2f, 17.2f);
+    camera.y = clampFloat(camera.y, 1.2f, 10.5f);
+    camera.z = clampFloat(camera.z, -18.8f, 21.0f);
+}
+
+void clampSelectedTransform()
+{
+    ArtifactTransform &transform =
+        artifactTransforms[selectedArtifact];
+
+    transform.x =
+        clampFloat(transform.x, -6.0f, 6.0f);
+
+    transform.y =
+        clampFloat(transform.y, -0.5f, 3.0f);
+
+    transform.z =
+        clampFloat(transform.z, -6.0f, 6.0f);
+
+    transform.scale =
+        clampFloat(transform.scale, 0.6f, 1.5f);
+
+    if (transform.rotationY >= 360.0f)
+        transform.rotationY -= 360.0f;
+
+    if (transform.rotationY <= -360.0f)
+        transform.rotationY += 360.0f;
+}
+
+void display()
+{
+    if (nightMode)
+        glClearColor(0.015f, 0.022f, 0.045f, 1.0f);
+    else
+        glClearColor(0.30f, 0.56f, 0.76f, 1.0f);
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    float yawRadians =
+        degreesToRadians(camera.yaw);
+
+    float pitchRadians =
+        degreesToRadians(camera.pitch);
+
+    float directionX =
+        std::cos(pitchRadians) *
+        std::cos(yawRadians);
+
+    float directionY =
+        std::sin(pitchRadians);
+
+    float directionZ =
+        std::cos(pitchRadians) *
+        std::sin(yawRadians);
+
+    /*
+       Viewing-coordinate transformation.
+    */
+    gluLookAt(
+        camera.x,
+        camera.y,
+        camera.z,
+        camera.x + directionX,
+        camera.y + directionY,
+        camera.z + directionZ,
+        0.0f,
+        1.0f,
+        0.0f
+    );
+
+    /*
+       Light positions are submitted after gluLookAt() and before any local
+       model transformation. Therefore they stay fixed in museum coordinates.
+    */
+    setupLights();
+
+    drawExterior();
+    drawRoom();
+    drawArtifacts();
+    drawOverlay();
+
+    glutSwapBuffers();
+}
+
+void reshape(int width, int height)
+{
+    if (height <= 0)
+        height = 1;
+
+    windowWidth = width;
+    windowHeight = height;
+
+    glViewport(0, 0, width, height);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+
+    gluPerspective(
+        62.0,
+        static_cast<double>(width) /
+            static_cast<double>(height),
+        0.10,
+        120.0
+    );
+
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void keyboard(unsigned char key, int, int)
+{
+    /* Make alphabetic controls case-insensitive */
+    if (key >= 'A' && key <= 'Z')
+    {
+        key = static_cast<unsigned char>(
+            key - 'A' + 'a'
+        );
+    }
+
+    if (key == 27)
+    {
+        if (sharedQuadric)
+        {
+            gluDeleteQuadric(sharedQuadric);
+            sharedQuadric = 0;
+        }
+
+        if (textures[0] != 0)
+        {
+            glDeleteTextures(TEX_COUNT, textures);
+        }
+
+        std::exit(0);
+    }
+
+    if (key == '\t')
+    {
+        selectedArtifact =
+            (selectedArtifact + 1) % ARTIFACT_COUNT;
+
+        glutPostRedisplay();
+        return;
+    }
+
+    if (key == ' ')
+    {
+        animationRunning = !animationRunning;
+
+        glutPostRedisplay();
+        return;
+    }
+
+    float yawRadians =
+        degreesToRadians(camera.yaw);
+
+    float forwardX = std::cos(yawRadians);
+    float forwardZ = std::sin(yawRadians);
+
+    float rightX = -forwardZ;
+    float rightZ = forwardX;
+
+    const float cameraStep = 0.45f;
+
+    ArtifactTransform &transform =
+        artifactTransforms[selectedArtifact];
+
+    switch (key)
+    {
+        case 'w':
+            camera.x += forwardX * cameraStep;
+            camera.z += forwardZ * cameraStep;
+            break;
+
+        case 's':
+            camera.x -= forwardX * cameraStep;
+            camera.z -= forwardZ * cameraStep;
+            break;
+
+        case 'a':
+            camera.x -= rightX * cameraStep;
+            camera.z -= rightZ * cameraStep;
+            break;
+
+        case 'd':
+            camera.x += rightX * cameraStep;
+            camera.z += rightZ * cameraStep;
+            break;
+
+        case 'j':
+            transform.x -= 0.30f;
+            break;
+
+        case 'l':
+            transform.x += 0.30f;
+            break;
+
+        case 'i':
+            transform.z -= 0.30f;
+            break;
+
+        case 'k':
+            transform.z += 0.30f;
+            break;
+
+        case 'u':
+            transform.y += 0.20f;
+            break;
+
+        case 'o':
+            transform.y -= 0.20f;
+            break;
+
+        case 'q':
+            transform.rotationY -= 5.0f;
+            break;
+
+        case 'e':
+            transform.rotationY += 5.0f;
+            break;
+
+        case '+':
+        case '=':
+            transform.scale += 0.05f;
+            break;
+
+        case '-':
+        case '_':
+            transform.scale -= 0.05f;
+            break;
+
+        case '1':
+            lightEnabled[0] = !lightEnabled[0];
+            break;
+
+        case '2':
+            lightEnabled[1] = !lightEnabled[1];
+            break;
+
+        case '3':
+            lightEnabled[2] = !lightEnabled[2];
+            break;
+
+        case 'n':
+            nightMode = !nightMode;
+            break;
+
+        case 'p':
+            cometVisible = !cometVisible;
+            break;
+
+        case 'g':
+            doorTargetOpen = !doorTargetOpen;
+            break;
+
+        case 'h':
+            showHelp = !showHelp;
+            break;
+
+        case 'r':
+            resetScene();
+            break;
+
+        default:
+            break;
+    }
+
+    clampCameraPosition();
+    clampSelectedTransform();
+
+    glutPostRedisplay();
+}
+
+void specialKeys(int key, int, int)
+{
+    const float lookStep = 3.0f;
+
+    switch (key)
+    {
+        case GLUT_KEY_LEFT:
+            camera.yaw -= lookStep;
+            break;
+
+        case GLUT_KEY_RIGHT:
+            camera.yaw += lookStep;
+            break;
+
+        case GLUT_KEY_UP:
+            camera.pitch += lookStep;
+            break;
+
+        case GLUT_KEY_DOWN:
+            camera.pitch -= lookStep;
+            break;
+
+        default:
+            break;
+    }
+
+    camera.pitch =
+        clampFloat(camera.pitch, -80.0f, 80.0f);
+
+    if (camera.yaw > 360.0f)
+        camera.yaw -= 360.0f;
+
+    if (camera.yaw < -360.0f)
+        camera.yaw += 360.0f;
+
+    glutPostRedisplay();
+}
+
+void timer(int)
+{
+    if (animationRunning)
+    {
+        /* Slow parent rotation of the mechanical Orrery */
+        orreryRotation += 0.12f;
+
+        /* Different revolution speeds */
+        planetOrbit[0] += 0.72f;
+        planetOrbit[1] += 0.43f;
+        planetOrbit[2] += 0.25f;
+
+        /* Different local spin speeds */
+        planetSpin[0] += 2.20f;
+        planetSpin[1] += 1.45f;
+        planetSpin[2] += 0.92f;
+
+        satelliteRotation += 0.28f;
+
+        if (cometVisible)
+        {
+            cometPosition += 0.09f;
+
+            if (cometPosition > 32.0f)
+                cometPosition = 0.0f;
+        }
+
+        if (orreryRotation >= 360.0f)
+            orreryRotation -= 360.0f;
+
+        if (satelliteRotation >= 360.0f)
+            satelliteRotation -= 360.0f;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            if (planetOrbit[i] >= 360.0f)
+                planetOrbit[i] -= 360.0f;
+
+            if (planetSpin[i] >= 360.0f)
+                planetSpin[i] -= 360.0f;
+        }
+    }
+
+    /*
+       Door movement remains active while exhibit animation is paused.
+    */
+    const float targetAngle =
+        doorTargetOpen ? 88.0f : 0.0f;
+
+    const float doorStep = 2.0f;
+
+    if (doorAngle < targetAngle)
+    {
+        doorAngle += doorStep;
+
+        if (doorAngle > targetAngle)
+            doorAngle = targetAngle;
+    }
+    else if (doorAngle > targetAngle)
+    {
+        doorAngle -= doorStep;
+
+        if (doorAngle < targetAngle)
+            doorAngle = targetAngle;
+    }
+
+    glutPostRedisplay();
+    glutTimerFunc(TIMER_INTERVAL_MS, timer, 0);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Initialization and program entry point                                    */
+/* ------------------------------------------------------------------------- */
+
+void initializeOpenGL()
+{
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+
+    glEnable(GL_LIGHTING);
+    glEnable(GL_NORMALIZE);
+
+    glShadeModel(GL_SMOOTH);
+
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
+    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_FALSE);
+
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+
+    /*
+       One reusable quadric is allocated after the OpenGL context exists.
+       It is reused by every cylinder and disk.
+    */
+    sharedQuadric = gluNewQuadric();
+
+    if (!sharedQuadric)
+    {
+        std::fprintf(
+            stderr,
+            "Unable to create the shared GLU quadric.\n"
+        );
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    gluQuadricNormals(sharedQuadric, GLU_SMOOTH);
+    gluQuadricTexture(sharedQuadric, GL_FALSE);
+
+    createProceduralTextures();
+}
+
+int main(int argc, char **argv)
+{
+    glutInit(&argc, argv);
+
+    glutInitDisplayMode(
+        GLUT_DOUBLE |
+        GLUT_RGB |
+        GLUT_DEPTH
+    );
+
+    glutInitWindowSize(1280, 720);
+    glutInitWindowPosition(70, 45);
+
+    glutCreateWindow(
+        "Interactive 3D Space Artifact Gallery"
+    );
+
+    initializeOpenGL();
+
+    glutDisplayFunc(display);
+    glutReshapeFunc(reshape);
+    glutKeyboardFunc(keyboard);
+    glutSpecialFunc(specialKeys);
+
+    glutTimerFunc(
+        TIMER_INTERVAL_MS,
+        timer,
+        0
+    );
+
+    glutMainLoop();
+
+    return 0;
+}
