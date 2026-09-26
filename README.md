@@ -3,7 +3,7 @@
 A medium-sized interactive 3D space museum developed using C++, legacy
 OpenGL, GLU, and FreeGLUT as a university Computer Graphics Lab project.
 
-![Gallery Overview](screenshots/gallery-overview.png)
+![Gallery Overview](screenshots/gallery-overview.jpg)
 
 ## Features
 
